@@ -36,19 +36,18 @@ const IS_WIKI_PAGE = window.location.href.includes("aqwwiki.wikidot.com");
 
 let AQWT_DROP_DATA_CACHE = null;
 
-// --- Hover Image Preview ---
+// --- Hover Image Preview ---// --- Hover Image Preview ---
 
 const container = document.createElement("div");
 container.className = "content-view";
 document.body.appendChild(container);
 
-const bodyContainer = document.querySelector("body");
-const links = document.querySelectorAll("a");
-bodyContainer.classList.add("container");
-links.forEach(link => link.classList.add("link-style"));
-
 let hoverTimeout;
 let hoverPreviewEnabled = true;
+let currentHoverItem = null;
+
+// Deteksi halaman Awesome Item
+const IS_AWESOME_ITEM_PAGE = window.location.href.includes("InventoryAwesomeUse");
 
 chrome.storage.local.get({ hoverPreviewEnabled: 1 }, (result) => {
     hoverPreviewEnabled = result.hoverPreviewEnabled !== 0;
@@ -61,91 +60,95 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 const imageCache = new Map();
 
-document.addEventListener("mouseover", (e) => {
-    if (!hoverPreviewEnabled) return;
-
-    let urlToSearch = null;
-    const link = e.target.closest("a");
-
-    if (link && link.href.startsWith("http://aqwwiki.wikidot.com/") && !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
-        urlToSearch = link.href;
-    } else if (IS_MANAGE_ACCOUNT && e.target.tagName === "TD") {
-        const td = e.target;
-        if (td.parentElement && td.parentElement.firstElementChild === td && td.textContent.trim() !== "") {
-            urlToSearch = generateWikiUrlFromText(td.textContent);
-        }
-    }
-
-    if (!urlToSearch) return;
-
-    clearTimeout(hoverTimeout);
-
-    hoverTimeout = setTimeout(async () => {
-        if (imageCache.has(urlToSearch)) {
-            showImage(imageCache.get(urlToSearch));
-            return;
-        }
-
-        try {
-            const imgSrc = await getImage(urlToSearch);
-            if (imgSrc && imgSrc.images) {
-                imageCache.set(urlToSearch, imgSrc);
-                showImage(imgSrc);
+/**
+ * Get item name and generate wiki URL from element
+ */
+function getItemInfoFromElement(element) {
+    // Untuk halaman Awesome Item - cari di dalam TD
+    if (IS_AWESOME_ITEM_PAGE || window.location.href.includes("account.aq.com/AQW/Inventory")) {
+        // Cari elemen TD (sel tabel)
+        const td = element.closest("td");
+        if (td && td.parentElement && td.parentElement.firstElementChild === td) {
+            // Cari link di dalam TD
+            const itemLink = td.querySelector("a");
+            if (itemLink && itemLink.textContent && itemLink.textContent.trim() !== "") {
+                return {
+                    itemName: itemLink.textContent.trim(),
+                    url: generateWikiUrlFromText(itemLink.textContent)
+                };
             }
-        } catch (err) {
-            console.error("Hover preview error:", err);
         }
-    }, 100);
-});
-
-document.addEventListener("mouseout", (e) => {
-    if (e.target.closest("a") || (IS_MANAGE_ACCOUNT && e.target.tagName === "TD")) {
-        container.classList.remove("visible");
-        while (container.firstChild) container.removeChild(container.firstChild);
-        clearTimeout(hoverTimeout);
+        
+        // Alternatif: langsung ke link
+        const link = element.closest("a");
+        if (link && link.closest(".dx-data-row") && link.textContent && link.textContent.trim() !== "") {
+            return {
+                itemName: link.textContent.trim(),
+                url: generateWikiUrlFromText(link.textContent)
+            };
+        }
     }
-});
+    
+    // Untuk halaman Wiki biasa
+    const link = element.closest("a");
+    if (link && link.href && link.href.startsWith("http://aqwwiki.wikidot.com/") && 
+        !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
+        return {
+            itemName: link.textContent.trim(),
+            url: link.href
+        };
+    }
+    
+    return null;
+}
 
 /**
  * Render fetched image data into the hover preview tooltip.
- * @param {{ images: string[], description: HTMLElement|null }} data
+ * @param {{ images: string[], description: HTMLElement|null, itemName?: string }} data
  */
 function showImage(data) {
     while (container.firstChild) container.removeChild(container.firstChild);
     container.classList.add("visible");
-
+    
     const imgContainer = document.createElement("div");
     imgContainer.className = "img-container";
     container.appendChild(imgContainer);
-
+    
     const typeImage = data.images.length > 1 ? "img-multiple" : "img-single";
     data.images.forEach(src => {
         const imgElement = document.createElement("img");
         imgElement.src = src;
         imgElement.className = `img-add ${typeImage}`;
+        imgElement.loading = "lazy";
         imgContainer.appendChild(imgElement);
     });
-
-    if (data.description) {
+    
+    if (data.description && data.description.children.length > 0) {
         container.appendChild(data.description);
+    } else {
+        const fallbackDesc = document.createElement("div");
+        fallbackDesc.className = "aqwt-hover-details";
+        fallbackDesc.innerHTML = "<p><em>No additional details available</em></p>";
+        container.appendChild(fallbackDesc);
     }
     
     // Add Drop Rate info if available
-    if (data.itemName && typeof AQWT_DROP_DATA_CACHE !== "undefined" && AQWT_DROP_DATA_CACHE) {
+    if (data.itemName && AQWT_DROP_DATA_CACHE && AQWT_DROP_DATA_CACHE.lookup) {
         const baseName = getBaseName(data.itemName).toLowerCase();
-        // Try precise match then fuzzy match
-        const entry = AQWT_DROP_DATA_CACHE.lookup.get(data.itemName.toLowerCase()) || AQWT_DROP_DATA_CACHE.lookup.get(baseName);
+        const entry = AQWT_DROP_DATA_CACHE.lookup.get(data.itemName.toLowerCase()) || 
+                      AQWT_DROP_DATA_CACHE.lookup.get(baseName);
         
         if (entry) {
             const dropRateDiv = document.createElement("div");
             dropRateDiv.className = "aqwt-hover-droprate";
+            dropRateDiv.style.cssText = "margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.85rem;";
             
             const rateText = entry.rate || (AQWT_DROP_DATA_CACHE.tiers && AQWT_DROP_DATA_CACHE.tiers[entry.tier]) || entry.tier;
-            dropRateDiv.innerHTML = `<strong style="color: #4ade80;">Drop Rate:</strong> <span class="aqwt-droprate-badge" style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 4px;">${escapeHtml(rateText)}</span>`;
+            dropRateDiv.innerHTML = `<strong style="color: #4ade80;">📊 Drop Rate:</strong> <span class="aqwt-droprate-badge" style="background: rgba(74,222,128,0.15); padding: 2px 8px; border-radius: 4px; margin-left: 6px; color: #4ade80;">${escapeHtml(rateText)}</span>`;
             
             if (entry.note) {
                 const note = document.createElement("div");
-                note.style.fontSize = "0.85em";
+                note.style.fontSize = "0.8em";
                 note.style.marginTop = "6px";
                 note.style.color = "#aaa";
                 note.textContent = entry.note;
@@ -173,57 +176,57 @@ function isValidImg(srcImg) {
  * Follows disambiguation links up to one level deep.
  * @param {string} url - Wiki page URL.
  * @param {number} [attempt=1] - Current recursion depth (max 2).
- * @returns {Promise<{images: string[], description: HTMLElement|null}|null>}
+ * @returns {Promise<{images: string[], description: HTMLElement|null, itemName: string|null}|null>}
  */
 async function getImage(url, attempt = 1) {
     return new Promise((resolve) => {
         if (attempt > 2) return resolve(null);
-
+        
         chrome.runtime.sendMessage({ action: "fetchWikiHTML", url }, async (response) => {
             if (chrome.runtime.lastError || !response || !response.success) {
                 return resolve(null);
             }
-
+            
             try {
                 const doc = new DOMParser().parseFromString(response.html, "text/html");
                 let foundImages = [];
-
+                
                 const imgMale = doc.querySelector("#wiki-tab-0-0 img");
                 const imgFemale = doc.querySelector("#wiki-tab-0-1 img");
-
+                
                 if (imgMale && isValidImg(imgMale.src)) foundImages.push(imgMale.src);
                 if (imgFemale && isValidImg(imgFemale.src)) foundImages.push(imgFemale.src);
-
+                
                 if (foundImages.length === 0) {
                     const allImages = Array.from(doc.querySelectorAll("#page-content img"));
                     const allPathLinks = Array.from(doc.querySelectorAll("#breadcrumbs a"));
-
+                    
                     const isBlockedCategory = allPathLinks.some(link => {
                         const text = link.textContent.trim();
                         return text === "Quests" || text === "Shops" || text === "Factions";
                     });
-
+                    
                     if (isBlockedCategory) return resolve(null);
-
+                    
                     let singleImg = allImages.find(img => {
                         const src = img.src.toLowerCase();
                         return isValidImg(src) && src.includes("imgur.com");
                     });
-
+                    
                     if (!singleImg) {
                         singleImg = allImages.find(img => isValidImg(img.src) && !img.src.includes("/image-tags/"));
                     }
-
+                    
                     if (singleImg) foundImages.push(singleImg.src);
                 }
-
+                
                 // Check if it's actually an item page even if missing images
                 let isItemPage = false;
                 const pageText = doc.querySelector("#page-content")?.textContent || "";
                 if (pageText.includes("Location:") || pageText.includes("Locations:") || pageText.includes("Price:") || pageText.includes("Base Stats:")) {
                     isItemPage = true;
                 }
-
+                
                 // Disambiguation: follow the first internal link if no images found AND it's not a real item page
                 if (foundImages.length === 0 && !isItemPage) {
                     const pageLinks = Array.from(doc.querySelectorAll("#page-content a"));
@@ -233,17 +236,18 @@ async function getImage(url, attempt = 1) {
                         const hrefLower = href.toLowerCase();
                         return href.startsWith("/") && !hrefLower.includes(":") && !hrefLower.includes("npc");
                     });
-
+                    
                     if (disambiguationLink) {
                         const newUrl = "http://aqwwiki.wikidot.com" + disambiguationLink.getAttribute("href");
                         const result = await getImage(newUrl, attempt + 1);
                         return resolve(result);
                     }
                 }
-
+                
                 // --- Parse Description Details ---
                 const detailsContainer = document.createElement("div");
                 detailsContainer.className = "aqwt-hover-details";
+                detailsContainer.style.cssText = "max-height: 200px; overflow-y: auto; font-size: 0.8rem; line-height: 1.4; margin-top: 6px;";
                 
                 const pageContentDiv = doc.querySelector("#page-content");
                 if (pageContentDiv) {
@@ -308,26 +312,40 @@ async function getImage(url, attempt = 1) {
                             
                             detailsContainer.appendChild(clone);
                             numTabs++;
-                            if (numTabs >= 3) break; // Keep hover info extremely short and punchy
+                            if (numTabs >= 3) break;
                         }
                     }
                     
                     if (numTabs === 0) {
                         const pTags = Array.from(pageContentDiv.querySelectorAll("p"));
                         const fb = pTags.find(p => p.textContent.includes("Location:")) || pTags[2] || pTags[1];
-                        if (fb) detailsContainer.appendChild(fb.cloneNode(true));
+                        if (fb) {
+                            const clone = fb.cloneNode(true);
+                            if (clone.textContent.length > 300) {
+                                clone.textContent = clone.textContent.substring(0, 300) + "...";
+                            }
+                            detailsContainer.appendChild(clone);
+                        }
                     }
                 }
                 
                 const pageTitle = doc.querySelector("#page-title");
                 const itemName = pageTitle ? pageTitle.textContent.trim() : null;
-
+                
+                if (detailsContainer.children.length === 0) {
+                    const placeholder = document.createElement("p");
+                    placeholder.textContent = "Click to view full wiki page";
+                    placeholder.style.color = "#aaa";
+                    placeholder.style.fontStyle = "italic";
+                    detailsContainer.appendChild(placeholder);
+                }
+                
                 resolve({
-                    images: foundImages,
+                    images: foundImages.length > 0 ? foundImages : ["https://aqwwiki.wikidot.com/local--files/files/NoImage.jpg"],
                     description: detailsContainer,
                     itemName: itemName
                 });
-
+                
             } catch (err) {
                 console.error("Error processing wiki HTML:", err);
                 resolve(null);
@@ -336,6 +354,133 @@ async function getImage(url, attempt = 1) {
     });
 }
 
+// === SOLUSI UTAMA: Gunakan mouseenter/mouseleave pada parent row ===
+if (IS_AWESOME_ITEM_PAGE) {
+    // Fungsi untuk memasang listener pada semua baris item
+    function attachHoverToRows() {
+        const rows = document.querySelectorAll(".dx-data-row");
+        
+        rows.forEach(row => {
+            // Cari sel pertama (tempat nama item berada)
+            const firstCell = row.querySelector("td:first-child");
+            if (firstCell && !firstCell.hasAttribute("data-hover-listener")) {
+                firstCell.setAttribute("data-hover-listener", "true");
+                
+                // Mouse enter - tampilkan preview
+                firstCell.addEventListener("mouseenter", (e) => {
+                    if (!hoverPreviewEnabled) return;
+                    
+                    const itemLink = firstCell.querySelector("a");
+                    if (!itemLink || !itemLink.textContent) return;
+                    
+                    const itemName = itemLink.textContent.trim();
+                    const wikiUrl = generateWikiUrlFromText(itemName);
+                    
+                    if (!wikiUrl) return;
+                    
+                    currentHoverItem = wikiUrl;
+                    clearTimeout(hoverTimeout);
+                    
+                    hoverTimeout = setTimeout(async () => {
+                        if (currentHoverItem !== wikiUrl) return;
+                        
+                        if (imageCache.has(wikiUrl)) {
+                            showImage(imageCache.get(wikiUrl));
+                            return;
+                        }
+                        
+                        try {
+                            const imgSrc = await getImage(wikiUrl);
+                            if (imgSrc && imgSrc.images && imgSrc.images.length > 0) {
+                                imageCache.set(wikiUrl, imgSrc);
+                                if (currentHoverItem === wikiUrl) {
+                                    showImage(imgSrc);
+                                }
+                            }
+                        } catch (err) {
+                            console.error("Hover preview error:", err);
+                        }
+                    }, 100);
+                });
+                
+                // Mouse leave - sembunyikan preview
+                firstCell.addEventListener("mouseleave", () => {
+                    clearTimeout(hoverTimeout);
+                    currentHoverItem = null;
+                    container.classList.remove("visible");
+                    while (container.firstChild) container.removeChild(container.firstChild);
+                });
+            }
+        });
+    }
+    
+    // Jalankan pertama kali
+    setTimeout(attachHoverToRows, 500);
+    
+    // Observer untuk menangani perubahan grid (pagination, filter, sorting)
+    const gridObserver = new MutationObserver(() => {
+        attachHoverToRows();
+    });
+    
+    // Mulai observasi ketika grid container tersedia
+    const waitForGrid = setInterval(() => {
+        const gridContainer = document.querySelector(".dx-datagrid-rowsview");
+        if (gridContainer) {
+            gridObserver.observe(gridContainer, { childList: true, subtree: true });
+            clearInterval(waitForGrid);
+        }
+    }, 500);
+    
+} else {
+    // Untuk halaman lain (Wiki, Inventory biasa) gunakan event mouseover/mouseout biasa
+    document.addEventListener("mouseover", (e) => {
+        if (!hoverPreviewEnabled) return;
+        
+        const itemInfo = getItemInfoFromElement(e.target);
+        if (!itemInfo || !itemInfo.url) return;
+        
+        currentHoverItem = itemInfo.url;
+        clearTimeout(hoverTimeout);
+        
+        hoverTimeout = setTimeout(async () => {
+            if (currentHoverItem !== itemInfo.url) return;
+            
+            if (imageCache.has(itemInfo.url)) {
+                showImage(imageCache.get(itemInfo.url));
+                return;
+            }
+            
+            try {
+                const imgSrc = await getImage(itemInfo.url);
+                if (imgSrc && imgSrc.images && imgSrc.images.length > 0) {
+                    imageCache.set(itemInfo.url, imgSrc);
+                    if (currentHoverItem === itemInfo.url) {
+                        showImage(imgSrc);
+                    }
+                }
+            } catch (err) {
+                console.error("Hover preview error:", err);
+            }
+        }, 100);
+    });
+    
+    document.addEventListener("mouseout", (e) => {
+        const itemInfo = getItemInfoFromElement(e.target);
+        if (itemInfo && itemInfo.url) {
+            setTimeout(() => {
+                const newItem = getItemInfoFromElement(document.elementFromPoint(e.clientX, e.clientY));
+                if (!newItem || newItem.url !== itemInfo.url) {
+                    if (currentHoverItem === itemInfo.url) {
+                        container.classList.remove("visible");
+                        while (container.firstChild) container.removeChild(container.firstChild);
+                        clearTimeout(hoverTimeout);
+                        currentHoverItem = null;
+                    }
+                }
+            }, 50);
+        }
+    });
+}
 // --- Theme Management ---
 
 /**
