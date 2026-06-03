@@ -20,14 +20,30 @@ function escapeHtml(str) {
 
 /**
  * Remove wiki tag suffixes like "(Class)", "(Armor)", "(AC)" from item names.
+ * Also removes quantity indicators like " x90", " x1000".
+ * Returns lowercase string for case-insensitive matching.
  * @param {string} itemName - Raw item name from wiki or inventory.
- * @returns {string} Cleaned base name suitable for cross-source matching.
+ * @returns {string} Cleaned base name in lowercase for matching.
  */
 function getBaseName(itemName) {
-    return itemName.replace(
-        /\s*\((Class|Armor|Helm|Cape|Weapon|Pet|Misc|Necklace|Sword|Dagger|Axe|Mace|Polearm|Staff|Wand|Bow|Gun|0 AC|AC|Legend|Non-Legend|Merge|Rare|VIP|Monster)\)/gi,
+    if (!itemName) return "";
+    
+    // Convert to lowercase FIRST for case-insensitive matching
+    let cleaned = itemName.toLowerCase().trim();
+    
+    // Remove quantity like " x90", " x1000", " x1,000"
+    cleaned = cleaned.replace(/\s+x[\d,]+$/i, "").trim();
+    
+    // Normalize apostrophes (different types: ' vs ’ vs ‘)
+    cleaned = cleaned.replace(/[‘’']/g, "'");
+    
+    // Remove suffix in parentheses
+    cleaned = cleaned.replace(
+        /\s*\((class|armor|helm|cape|weapon|pet|misc|necklace|sword|dagger|axe|mace|polearm|staff|wand|bow|gun|0 ac|ac|legend|non-legend|merge|rare|vip|monster|resource|item|quest item|floor item|wall item|house|ground|necklace|rank\s+\d+)\)/gi,
         ""
     ).trim();
+    
+    return cleaned;
 }
 
 const IS_MANAGE_ACCOUNT = window.location.href.includes("account.aq.com/AQW/Inventory");
@@ -36,18 +52,19 @@ const IS_WIKI_PAGE = window.location.href.includes("aqwwiki.wikidot.com");
 
 let AQWT_DROP_DATA_CACHE = null;
 
-// --- Hover Image Preview ---// --- Hover Image Preview ---
+// --- Hover Image Preview ---
 
 const container = document.createElement("div");
 container.className = "content-view";
 document.body.appendChild(container);
 
+const bodyContainer = document.querySelector("body");
+const links = document.querySelectorAll("a");
+bodyContainer.classList.add("container");
+links.forEach(link => link.classList.add("link-style"));
+
 let hoverTimeout;
 let hoverPreviewEnabled = true;
-let currentHoverItem = null;
-
-// Deteksi halaman Awesome Item
-const IS_AWESOME_ITEM_PAGE = window.location.href.includes("InventoryAwesomeUse");
 
 chrome.storage.local.get({ hoverPreviewEnabled: 1 }, (result) => {
     hoverPreviewEnabled = result.hoverPreviewEnabled !== 0;
@@ -60,95 +77,91 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 const imageCache = new Map();
 
-/**
- * Get item name and generate wiki URL from element
- */
-function getItemInfoFromElement(element) {
-    // Untuk halaman Awesome Item - cari di dalam TD
-    if (IS_AWESOME_ITEM_PAGE || window.location.href.includes("account.aq.com/AQW/Inventory")) {
-        // Cari elemen TD (sel tabel)
-        const td = element.closest("td");
-        if (td && td.parentElement && td.parentElement.firstElementChild === td) {
-            // Cari link di dalam TD
-            const itemLink = td.querySelector("a");
-            if (itemLink && itemLink.textContent && itemLink.textContent.trim() !== "") {
-                return {
-                    itemName: itemLink.textContent.trim(),
-                    url: generateWikiUrlFromText(itemLink.textContent)
-                };
+document.addEventListener("mouseover", (e) => {
+    if (!hoverPreviewEnabled) return;
+
+    let urlToSearch = null;
+    const link = e.target.closest("a");
+
+    if (link && link.href.startsWith("http://aqwwiki.wikidot.com/") && !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
+        urlToSearch = link.href;
+    } else if (IS_MANAGE_ACCOUNT && e.target.tagName === "TD") {
+        const td = e.target;
+        if (td.parentElement && td.parentElement.firstElementChild === td && td.textContent.trim() !== "") {
+            urlToSearch = generateWikiUrlFromText(td.textContent);
+        }
+    }
+
+    if (!urlToSearch) return;
+
+    clearTimeout(hoverTimeout);
+
+    hoverTimeout = setTimeout(async () => {
+        if (imageCache.has(urlToSearch)) {
+            showImage(imageCache.get(urlToSearch));
+            return;
+        }
+
+        try {
+            const imgSrc = await getImage(urlToSearch);
+            if (imgSrc && imgSrc.images) {
+                imageCache.set(urlToSearch, imgSrc);
+                showImage(imgSrc);
             }
+        } catch (err) {
+            console.error("Hover preview error:", err);
         }
-        
-        // Alternatif: langsung ke link
-        const link = element.closest("a");
-        if (link && link.closest(".dx-data-row") && link.textContent && link.textContent.trim() !== "") {
-            return {
-                itemName: link.textContent.trim(),
-                url: generateWikiUrlFromText(link.textContent)
-            };
-        }
+    }, 100);
+});
+
+document.addEventListener("mouseout", (e) => {
+    if (e.target.closest("a") || (IS_MANAGE_ACCOUNT && e.target.tagName === "TD")) {
+        container.classList.remove("visible");
+        while (container.firstChild) container.removeChild(container.firstChild);
+        clearTimeout(hoverTimeout);
     }
-    
-    // Untuk halaman Wiki biasa
-    const link = element.closest("a");
-    if (link && link.href && link.href.startsWith("http://aqwwiki.wikidot.com/") && 
-        !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
-        return {
-            itemName: link.textContent.trim(),
-            url: link.href
-        };
-    }
-    
-    return null;
-}
+});
 
 /**
  * Render fetched image data into the hover preview tooltip.
- * @param {{ images: string[], description: HTMLElement|null, itemName?: string }} data
+ * @param {{ images: string[], description: HTMLElement|null }} data
  */
 function showImage(data) {
     while (container.firstChild) container.removeChild(container.firstChild);
     container.classList.add("visible");
-    
+
     const imgContainer = document.createElement("div");
     imgContainer.className = "img-container";
     container.appendChild(imgContainer);
-    
+
     const typeImage = data.images.length > 1 ? "img-multiple" : "img-single";
     data.images.forEach(src => {
         const imgElement = document.createElement("img");
         imgElement.src = src;
         imgElement.className = `img-add ${typeImage}`;
-        imgElement.loading = "lazy";
         imgContainer.appendChild(imgElement);
     });
-    
-    if (data.description && data.description.children.length > 0) {
+
+    if (data.description) {
         container.appendChild(data.description);
-    } else {
-        const fallbackDesc = document.createElement("div");
-        fallbackDesc.className = "aqwt-hover-details";
-        fallbackDesc.innerHTML = "<p><em>No additional details available</em></p>";
-        container.appendChild(fallbackDesc);
     }
     
     // Add Drop Rate info if available
-    if (data.itemName && AQWT_DROP_DATA_CACHE && AQWT_DROP_DATA_CACHE.lookup) {
-        const baseName = getBaseName(data.itemName).toLowerCase();
-        const entry = AQWT_DROP_DATA_CACHE.lookup.get(data.itemName.toLowerCase()) || 
-                      AQWT_DROP_DATA_CACHE.lookup.get(baseName);
+    if (data.itemName && typeof AQWT_DROP_DATA_CACHE !== "undefined" && AQWT_DROP_DATA_CACHE) {
+        const baseName = getBaseName(data.itemName);
+        // Try precise match then fuzzy match
+        const entry = AQWT_DROP_DATA_CACHE.lookup.get(data.itemName.toLowerCase()) || AQWT_DROP_DATA_CACHE.lookup.get(baseName);
         
         if (entry) {
             const dropRateDiv = document.createElement("div");
             dropRateDiv.className = "aqwt-hover-droprate";
-            dropRateDiv.style.cssText = "margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.85rem;";
             
             const rateText = entry.rate || (AQWT_DROP_DATA_CACHE.tiers && AQWT_DROP_DATA_CACHE.tiers[entry.tier]) || entry.tier;
-            dropRateDiv.innerHTML = `<strong style="color: #4ade80;">📊 Drop Rate:</strong> <span class="aqwt-droprate-badge" style="background: rgba(74,222,128,0.15); padding: 2px 8px; border-radius: 4px; margin-left: 6px; color: #4ade80;">${escapeHtml(rateText)}</span>`;
+            dropRateDiv.innerHTML = `<strong style="color: #4ade80;">Drop Rate:</strong> <span class="aqwt-droprate-badge" style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 4px;">${escapeHtml(rateText)}</span>`;
             
             if (entry.note) {
                 const note = document.createElement("div");
-                note.style.fontSize = "0.8em";
+                note.style.fontSize = "0.85em";
                 note.style.marginTop = "6px";
                 note.style.color = "#aaa";
                 note.textContent = entry.note;
@@ -176,57 +189,57 @@ function isValidImg(srcImg) {
  * Follows disambiguation links up to one level deep.
  * @param {string} url - Wiki page URL.
  * @param {number} [attempt=1] - Current recursion depth (max 2).
- * @returns {Promise<{images: string[], description: HTMLElement|null, itemName: string|null}|null>}
+ * @returns {Promise<{images: string[], description: HTMLElement|null}|null>}
  */
 async function getImage(url, attempt = 1) {
     return new Promise((resolve) => {
         if (attempt > 2) return resolve(null);
-        
+
         chrome.runtime.sendMessage({ action: "fetchWikiHTML", url }, async (response) => {
             if (chrome.runtime.lastError || !response || !response.success) {
                 return resolve(null);
             }
-            
+
             try {
                 const doc = new DOMParser().parseFromString(response.html, "text/html");
                 let foundImages = [];
-                
+
                 const imgMale = doc.querySelector("#wiki-tab-0-0 img");
                 const imgFemale = doc.querySelector("#wiki-tab-0-1 img");
-                
+
                 if (imgMale && isValidImg(imgMale.src)) foundImages.push(imgMale.src);
                 if (imgFemale && isValidImg(imgFemale.src)) foundImages.push(imgFemale.src);
-                
+
                 if (foundImages.length === 0) {
                     const allImages = Array.from(doc.querySelectorAll("#page-content img"));
                     const allPathLinks = Array.from(doc.querySelectorAll("#breadcrumbs a"));
-                    
+
                     const isBlockedCategory = allPathLinks.some(link => {
                         const text = link.textContent.trim();
                         return text === "Quests" || text === "Shops" || text === "Factions";
                     });
-                    
+
                     if (isBlockedCategory) return resolve(null);
-                    
+
                     let singleImg = allImages.find(img => {
                         const src = img.src.toLowerCase();
                         return isValidImg(src) && src.includes("imgur.com");
                     });
-                    
+
                     if (!singleImg) {
                         singleImg = allImages.find(img => isValidImg(img.src) && !img.src.includes("/image-tags/"));
                     }
-                    
+
                     if (singleImg) foundImages.push(singleImg.src);
                 }
-                
+
                 // Check if it's actually an item page even if missing images
                 let isItemPage = false;
                 const pageText = doc.querySelector("#page-content")?.textContent || "";
                 if (pageText.includes("Location:") || pageText.includes("Locations:") || pageText.includes("Price:") || pageText.includes("Base Stats:")) {
                     isItemPage = true;
                 }
-                
+
                 // Disambiguation: follow the first internal link if no images found AND it's not a real item page
                 if (foundImages.length === 0 && !isItemPage) {
                     const pageLinks = Array.from(doc.querySelectorAll("#page-content a"));
@@ -236,18 +249,17 @@ async function getImage(url, attempt = 1) {
                         const hrefLower = href.toLowerCase();
                         return href.startsWith("/") && !hrefLower.includes(":") && !hrefLower.includes("npc");
                     });
-                    
+
                     if (disambiguationLink) {
                         const newUrl = "http://aqwwiki.wikidot.com" + disambiguationLink.getAttribute("href");
                         const result = await getImage(newUrl, attempt + 1);
                         return resolve(result);
                     }
                 }
-                
+
                 // --- Parse Description Details ---
                 const detailsContainer = document.createElement("div");
                 detailsContainer.className = "aqwt-hover-details";
-                detailsContainer.style.cssText = "max-height: 200px; overflow-y: auto; font-size: 0.8rem; line-height: 1.4; margin-top: 6px;";
                 
                 const pageContentDiv = doc.querySelector("#page-content");
                 if (pageContentDiv) {
@@ -312,40 +324,26 @@ async function getImage(url, attempt = 1) {
                             
                             detailsContainer.appendChild(clone);
                             numTabs++;
-                            if (numTabs >= 3) break;
+                            if (numTabs >= 3) break; // Keep hover info extremely short and punchy
                         }
                     }
                     
                     if (numTabs === 0) {
                         const pTags = Array.from(pageContentDiv.querySelectorAll("p"));
                         const fb = pTags.find(p => p.textContent.includes("Location:")) || pTags[2] || pTags[1];
-                        if (fb) {
-                            const clone = fb.cloneNode(true);
-                            if (clone.textContent.length > 300) {
-                                clone.textContent = clone.textContent.substring(0, 300) + "...";
-                            }
-                            detailsContainer.appendChild(clone);
-                        }
+                        if (fb) detailsContainer.appendChild(fb.cloneNode(true));
                     }
                 }
                 
                 const pageTitle = doc.querySelector("#page-title");
                 const itemName = pageTitle ? pageTitle.textContent.trim() : null;
-                
-                if (detailsContainer.children.length === 0) {
-                    const placeholder = document.createElement("p");
-                    placeholder.textContent = "Click to view full wiki page";
-                    placeholder.style.color = "#aaa";
-                    placeholder.style.fontStyle = "italic";
-                    detailsContainer.appendChild(placeholder);
-                }
-                
+
                 resolve({
-                    images: foundImages.length > 0 ? foundImages : ["https://aqwwiki.wikidot.com/local--files/files/NoImage.jpg"],
+                    images: foundImages,
                     description: detailsContainer,
                     itemName: itemName
                 });
-                
+
             } catch (err) {
                 console.error("Error processing wiki HTML:", err);
                 resolve(null);
@@ -354,133 +352,6 @@ async function getImage(url, attempt = 1) {
     });
 }
 
-// === SOLUSI UTAMA: Gunakan mouseenter/mouseleave pada parent row ===
-if (IS_AWESOME_ITEM_PAGE) {
-    // Fungsi untuk memasang listener pada semua baris item
-    function attachHoverToRows() {
-        const rows = document.querySelectorAll(".dx-data-row");
-        
-        rows.forEach(row => {
-            // Cari sel pertama (tempat nama item berada)
-            const firstCell = row.querySelector("td:first-child");
-            if (firstCell && !firstCell.hasAttribute("data-hover-listener")) {
-                firstCell.setAttribute("data-hover-listener", "true");
-                
-                // Mouse enter - tampilkan preview
-                firstCell.addEventListener("mouseenter", (e) => {
-                    if (!hoverPreviewEnabled) return;
-                    
-                    const itemLink = firstCell.querySelector("a");
-                    if (!itemLink || !itemLink.textContent) return;
-                    
-                    const itemName = itemLink.textContent.trim();
-                    const wikiUrl = generateWikiUrlFromText(itemName);
-                    
-                    if (!wikiUrl) return;
-                    
-                    currentHoverItem = wikiUrl;
-                    clearTimeout(hoverTimeout);
-                    
-                    hoverTimeout = setTimeout(async () => {
-                        if (currentHoverItem !== wikiUrl) return;
-                        
-                        if (imageCache.has(wikiUrl)) {
-                            showImage(imageCache.get(wikiUrl));
-                            return;
-                        }
-                        
-                        try {
-                            const imgSrc = await getImage(wikiUrl);
-                            if (imgSrc && imgSrc.images && imgSrc.images.length > 0) {
-                                imageCache.set(wikiUrl, imgSrc);
-                                if (currentHoverItem === wikiUrl) {
-                                    showImage(imgSrc);
-                                }
-                            }
-                        } catch (err) {
-                            console.error("Hover preview error:", err);
-                        }
-                    }, 100);
-                });
-                
-                // Mouse leave - sembunyikan preview
-                firstCell.addEventListener("mouseleave", () => {
-                    clearTimeout(hoverTimeout);
-                    currentHoverItem = null;
-                    container.classList.remove("visible");
-                    while (container.firstChild) container.removeChild(container.firstChild);
-                });
-            }
-        });
-    }
-    
-    // Jalankan pertama kali
-    setTimeout(attachHoverToRows, 500);
-    
-    // Observer untuk menangani perubahan grid (pagination, filter, sorting)
-    const gridObserver = new MutationObserver(() => {
-        attachHoverToRows();
-    });
-    
-    // Mulai observasi ketika grid container tersedia
-    const waitForGrid = setInterval(() => {
-        const gridContainer = document.querySelector(".dx-datagrid-rowsview");
-        if (gridContainer) {
-            gridObserver.observe(gridContainer, { childList: true, subtree: true });
-            clearInterval(waitForGrid);
-        }
-    }, 500);
-    
-} else {
-    // Untuk halaman lain (Wiki, Inventory biasa) gunakan event mouseover/mouseout biasa
-    document.addEventListener("mouseover", (e) => {
-        if (!hoverPreviewEnabled) return;
-        
-        const itemInfo = getItemInfoFromElement(e.target);
-        if (!itemInfo || !itemInfo.url) return;
-        
-        currentHoverItem = itemInfo.url;
-        clearTimeout(hoverTimeout);
-        
-        hoverTimeout = setTimeout(async () => {
-            if (currentHoverItem !== itemInfo.url) return;
-            
-            if (imageCache.has(itemInfo.url)) {
-                showImage(imageCache.get(itemInfo.url));
-                return;
-            }
-            
-            try {
-                const imgSrc = await getImage(itemInfo.url);
-                if (imgSrc && imgSrc.images && imgSrc.images.length > 0) {
-                    imageCache.set(itemInfo.url, imgSrc);
-                    if (currentHoverItem === itemInfo.url) {
-                        showImage(imgSrc);
-                    }
-                }
-            } catch (err) {
-                console.error("Hover preview error:", err);
-            }
-        }, 100);
-    });
-    
-    document.addEventListener("mouseout", (e) => {
-        const itemInfo = getItemInfoFromElement(e.target);
-        if (itemInfo && itemInfo.url) {
-            setTimeout(() => {
-                const newItem = getItemInfoFromElement(document.elementFromPoint(e.clientX, e.clientY));
-                if (!newItem || newItem.url !== itemInfo.url) {
-                    if (currentHoverItem === itemInfo.url) {
-                        container.classList.remove("visible");
-                        while (container.firstChild) container.removeChild(container.firstChild);
-                        clearTimeout(hoverTimeout);
-                        currentHoverItem = null;
-                    }
-                }
-            }, 50);
-        }
-    });
-}
 // --- Theme Management ---
 
 /**
@@ -503,24 +374,29 @@ document.addEventListener("click", (event) => {
     if (clickedNavset) targetNavset = clickedNavset;
 });
 
-const pageTitle = document.querySelector("#page-title");
+const pageTitleEl = document.querySelector("#page-title");
 const breadcrumbLinks = document.querySelectorAll("#breadcrumbs a");
 
-const isMergePage = (pageTitle && pageTitle.textContent.includes("Merge")) ||
+const isMergePage = (pageTitleEl && pageTitleEl.textContent.includes("Merge")) ||
     (breadcrumbLinks && Array.from(breadcrumbLinks).some(a => a.textContent.includes("Merge")));
-const isQuestPage = (pageTitle && pageTitle.textContent.includes("Quest")) ||
+const isQuestPage = (pageTitleEl && pageTitleEl.textContent.includes("Quest")) ||
     (breadcrumbLinks && Array.from(breadcrumbLinks).some(a => a.textContent.includes("Quest")));
+
+// Global variables for inventory data
+let rawInventoryGlobal = [];
+let inventoryCountGlobal = {};
 
 if (isMergePage || isQuestPage) {
 
     chrome.storage.local.get(["savedInventory"], (result) => {
-        const rawInventory = result.savedInventory || [];
+        rawInventoryGlobal = result.savedInventory || [];
+        inventoryCountGlobal = {};
 
-        const inventoryCount = {};
-        if (Array.isArray(rawInventory)) {
-            rawInventory.forEach(item => {
+        if (Array.isArray(rawInventoryGlobal)) {
+            rawInventoryGlobal.forEach(item => {
                 const cleanName = getBaseName(item.name);
-                inventoryCount[cleanName] = (inventoryCount[cleanName] || 0) + parseInt(item.quantity || 1, 10);
+                const qty = parseInt(item.quantity || 1, 10);
+                inventoryCountGlobal[cleanName] = (inventoryCountGlobal[cleanName] || 0) + qty;
             });
         }
 
@@ -563,7 +439,7 @@ if (isMergePage || isQuestPage) {
                 countItems++;
                 const cleanShopName = getBaseName(itemLink.textContent);
 
-                if (inventoryCount[cleanShopName]) {
+                if (inventoryCountGlobal[cleanShopName]) {
                     ownedShopItems++;
                     return;
                 }
@@ -637,6 +513,20 @@ if (isMergePage || isQuestPage) {
         }
 
         /**
+         * Get item location (Inventory/Bank) from saved inventory.
+         * @param {string} itemName - Clean item name (already lowercased).
+         * @returns {string|null} "Inventory", "Bank", or null if not found.
+         */
+        function getItemLocationFromInventory(itemName) {
+            if (!rawInventoryGlobal) return null;
+            const item = rawInventoryGlobal.find(i => getBaseName(i.name) === itemName);
+            if (item && item.location) {
+                return item.location.toLowerCase().includes("bank") ? "Bank" : "Inventory";
+            }
+            return null;
+        }
+
+        /**
          * Build the calculator DOM panel and insert it above the wiki tabs.
          * @returns {HTMLDivElement|undefined}
          */
@@ -696,7 +586,7 @@ if (isMergePage || isQuestPage) {
                 let totalMaterialsGathered = 0;
 
                 for (const [material, totalNeeded] of Object.entries(requiredTotals)) {
-                    const qtyInInventory = inventoryCount[material] || 0;
+                    const qtyInInventory = inventoryCountGlobal[material] || 0;
                     totalMaterialsNeeded += totalNeeded;
                     totalMaterialsGathered += Math.min(qtyInInventory, totalNeeded);
                 }
@@ -724,18 +614,41 @@ if (isMergePage || isQuestPage) {
                         <tbody>`;
 
                 for (const [material, totalNeeded] of Object.entries(requiredTotals)) {
-                    const qtyInInventory = inventoryCount[material] || 0;
+                    const qtyInInventory = inventoryCountGlobal[material] || 0;
                     const missingQty = Math.max(0, totalNeeded - qtyInInventory);
+                    
+                    // Determine status and color for "You Have" column
+                    const isSufficient = qtyInInventory >= totalNeeded;
                     const statusCls = missingQty === 0 ? "ready" : "missing";
                     const missingText = missingQty === 0 ? "Ready" : `${missingQty}`;
+                    
+                    // Color for the "You Have" number
+                    const haveColor = isSufficient ? "#4ade80" : "#f87171";
+                    
+                    // Get item location (Bank or Inventory) from rawInventory
+                    let locationIcon = "";
+                    if (rawInventoryGlobal) {
+                        const itemData = rawInventoryGlobal.find(item => getBaseName(item.name) === material);
+                        if (itemData && itemData.location) {
+                            const isBank = itemData.location.toLowerCase().includes("bank");
+                            const iconUrl = chrome.runtime.getURL(isBank ? "assets/images/bank.png" : "assets/images/inventory.png");
+                            locationIcon = `<span class="aqwt-calc-location-icon" style="display:inline-flex; align-items:center; margin-left:6px;">
+                                <img src="${iconUrl}" style="width:14px; height:14px; vertical-align:middle;" title="In ${isBank ? "Bank" : "Inventory"}" alt="${isBank ? "Bank" : "Inventory"}">
+                            </span>`;
+                        }
+                    }
+                    
+                    // Build the display name with location icon if available
+                    const materialDisplay = `${safe(material)}${locationIcon}`;
 
                     calculatorHtml += `
                         <tr>
-                            <td class="aqwt-cell-name"><strong>${safe(material)}</strong></td>
+                            <td class="aqwt-cell-name"><strong>${materialDisplay}</strong></td>
                             <td class="aqwt-cell-center">${totalNeeded}</td>
-                            <td class="aqwt-cell-center aqwt-cell-have">${qtyInInventory}</td>
+                            <td class="aqwt-cell-center aqwt-cell-have" style="color: ${haveColor}; font-weight: bold;">${qtyInInventory}</td>
                             <td class="aqwt-cell-center aqwt-cell-${statusCls}">${missingText}</td>
-                        </tr>`;
+                        </tr>
+                    `;
                 }
 
                 calculatorHtml += `</tbody></table></div></div>`;
@@ -856,10 +769,14 @@ function generateWikiUrlFromText(rawText) {
 
 /**
  * Append an ownership icon to a wiki link element.
+ * Prevents duplicate badges.
  * @param {HTMLElement} link - The link or title element to annotate.
  * @param {string} [location="Inventory"] - "Inventory" or "Bank".
  */
 function haveItem(link, location = "Inventory") {
+    // Prevent duplicate badges
+    if (link.querySelector(".aqwt-owned-badge")) return;
+    
     const icon = document.createElement("span");
     icon.className = "aqwt-owned-badge";
 
@@ -878,7 +795,7 @@ function haveItem(link, location = "Inventory") {
     link.appendChild(icon);
 }
 
-// --- Character Page: Mark Owned Items ---
+// --- Character Page: Mark Owned Items (Case-Insensitive) ---
 
 if (IS_CHAR_PAGE) {
 
@@ -886,34 +803,76 @@ if (IS_CHAR_PAGE) {
         const inventory = result.savedInventory;
         if (!inventory || inventory.length === 0) return;
 
-        const inventoryNames = new Set(inventory.map(item => getBaseName(item.name)));
+        // Create normalized Set of item names (lowercase, without quantity, without tags)
+        const inventoryNames = new Set();
+        inventory.forEach(item => {
+            const cleanName = getBaseName(item.name);
+            inventoryNames.add(cleanName);
+        });
 
         let debounceTimer;
+        
         function markOwnedItems() {
+            // Process all span elements with class "item" first (most accurate)
+            const allSpans = document.querySelectorAll(".item");
+            
+            allSpans.forEach(span => {
+                // Get raw text and remove quantity like " x90"
+                let rawText = span.textContent.trim();
+                // Remove quantity suffix
+                rawText = rawText.replace(/\s+x[\d,]+$/i, "").trim();
+                // Remove rank suffix for classes
+                rawText = rawText.replace(/\s*\(Rank\s+\d+\)/i, "").trim();
+                
+                const itemName = getBaseName(rawText);
+                
+                if (inventoryNames.has(itemName)) {
+                    // Find the parent link or use the span's parent
+                    const link = span.closest("a");
+                    if (link && !link.classList.contains("item-marcado") && !link.querySelector(".aqwt-owned-badge")) {
+                        const icon = document.createElement("span");
+                        icon.textContent = " [Owned]";
+                        icon.className = "aqwt-owned-badge";
+                        icon.title = "You already have this item!";
+                        link.appendChild(icon);
+                        link.classList.add("item-marcado", "aqwt-owned-link");
+                    }
+                }
+            });
+            
+            // Process all links as fallback
             const allLinks = document.querySelectorAll("a");
-
+            
             allLinks.forEach(link => {
                 if (!link.textContent) return;
                 if (link.classList.contains("item-marcado")) return;
+                if (link.querySelector(".aqwt-owned-badge")) return;
                 link.classList.add("link-style");
 
-                const itemName = link.textContent.trim().replace(/\s*\(Rank\s+\d+\)/i, "").trim();
+                // Clean the text content
+                let rawText = link.textContent.trim();
+                // Remove rank suffix
+                rawText = rawText.replace(/\s*\(Rank\s+\d+\)/i, "").trim();
+                // Remove quantity suffix
+                rawText = rawText.replace(/\s+x[\d,]+$/i, "").trim();
+                
+                const itemName = getBaseName(rawText);
 
                 if (inventoryNames.has(itemName)) {
                     const icon = document.createElement("span");
                     icon.textContent = " [Owned]";
                     icon.className = "aqwt-owned-badge";
                     icon.title = "You already have this item!";
-
                     link.appendChild(icon);
-                    link.classList.add("item-marcado");
-                    link.classList.add("aqwt-owned-link");
+                    link.classList.add("item-marcado", "aqwt-owned-link");
                 }
             });
         }
 
+        // Initial marking
         markOwnedItems();
 
+        // Observe DOM changes for dynamically loaded content
         const observer = new MutationObserver(() => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(markOwnedItems, 200);
@@ -923,86 +882,104 @@ if (IS_CHAR_PAGE) {
     });
 }
 
-// --- Wiki Page: Mark Items with Inventory/Bank Icons ---
+// --- Wiki Page: Mark Items with Inventory/Bank Icons (Case-Insensitive) ---
 
-chrome.storage.local.get(["savedInventory"], (result) => {
-    const rawInventory = result.savedInventory;
-    if (!rawInventory || rawInventory.length === 0) return;
+if (IS_WIKI_PAGE) {
+    chrome.storage.local.get(["savedInventory"], (result) => {
+        const rawInventory = result.savedInventory;
+        if (!rawInventory || rawInventory.length === 0) return;
 
-    const inventoryNames = new Set(rawInventory.map(item => getBaseName(item.name)));
-
-    const wikiPageTitle = document.querySelector("#page-title");
-    const wikiLinks = document.querySelectorAll("#page-content a");
-
-    wikiLinks.forEach(link => {
-        const itemName = getBaseName(link.textContent);
-
-        if (inventoryNames.has(itemName)) {
-            if (rawInventory.some(item => getBaseName(item.name) === itemName && item.location.toLowerCase().includes("bank"))) {
-                haveItem(link, "Bank");
-            } else {
-                haveItem(link, "Inventory");
-            }
-        }
-    });
-
-    if (wikiPageTitle) {
-        const cleanTitle = getBaseName(wikiPageTitle.textContent);
-
-        if (inventoryNames.has(cleanTitle)) {
-            if (rawInventory.some(item => getBaseName(item.name) === cleanTitle && item.location.toLowerCase().includes("bank"))) {
-                haveItem(wikiPageTitle, "Bank");
-            } else {
-                haveItem(wikiPageTitle, "Inventory");
-            }
-        }
-    }
-
-    // Collection Chests progress tracker
-    if (wikiPageTitle && wikiPageTitle.textContent.trim() === "List of all Collection Chests") {
-        const chestLinks = document.querySelectorAll(".list-pages-box p a");
-        let totalChests = 0;
-        let ownedChests = 0;
-
-        chestLinks.forEach(link => {
-            const chestName = getBaseName(link.textContent);
-            if (chestName) {
-                totalChests++;
-                if (inventoryNames.has(chestName)) ownedChests++;
+        // Create normalized Set for case-insensitive matching
+        const inventoryNames = new Set();
+        const inventoryMap = new Map(); // Store item details for location check
+        
+        rawInventory.forEach(item => {
+            const cleanName = getBaseName(item.name);
+            inventoryNames.add(cleanName);
+            if (!inventoryMap.has(cleanName)) {
+                inventoryMap.set(cleanName, item);
             }
         });
 
-        if (totalChests > 0) {
-            const pct = Math.round((ownedChests / totalChests) * 100);
-            const barCls = pct === 100 ? "aqwt-progress-fill complete" : "aqwt-progress-fill";
+        const wikiPageTitle = document.querySelector("#page-title");
+        const wikiLinks = document.querySelectorAll("#page-content a");
 
-            const statsDiv = document.createElement("div");
-            statsDiv.className = "aqwt-chest-progress";
+        wikiLinks.forEach(link => {
+            const itemName = getBaseName(link.textContent);
 
-            const title = document.createElement("strong");
-            title.className = "aqwt-chest-title";
-            title.textContent = "Collection Chests Progress";
-            statsDiv.appendChild(title);
+            if (inventoryNames.has(itemName)) {
+                const itemData = inventoryMap.get(itemName);
+                if (itemData && itemData.location && itemData.location.toLowerCase().includes("bank")) {
+                    haveItem(link, "Bank");
+                } else {
+                    haveItem(link, "Inventory");
+                }
+            }
+        });
 
-            const counts = document.createElement("span");
-            counts.className = "aqwt-chest-counts";
-            counts.innerHTML = `<span class="aqwt-cell-have">${ownedChests}</span> / <span>${totalChests}</span> chests (${pct}%)`;
-            statsDiv.appendChild(counts);
+        if (wikiPageTitle) {
+            const cleanTitle = getBaseName(wikiPageTitle.textContent);
 
-            const barWrap = document.createElement("div");
-            barWrap.className = "aqwt-progress-bar";
-            const barFill = document.createElement("div");
-            barFill.className = barCls;
-            barFill.style.width = pct + "%";
-            barFill.textContent = pct + "%";
-            barWrap.appendChild(barFill);
-            statsDiv.appendChild(barWrap);
-
-            const contentDiv = document.querySelector("#page-content");
-            if (contentDiv) contentDiv.insertBefore(statsDiv, contentDiv.firstChild);
+            if (inventoryNames.has(cleanTitle)) {
+                const itemData = inventoryMap.get(cleanTitle);
+                if (itemData && itemData.location && itemData.location.toLowerCase().includes("bank")) {
+                    haveItem(wikiPageTitle, "Bank");
+                } else {
+                    haveItem(wikiPageTitle, "Inventory");
+                }
+            }
         }
-    }
-});
+
+        // Collection Chests progress tracker (Case-Insensitive)
+        if (wikiPageTitle && wikiPageTitle.textContent.trim() === "List of all Collection Chests") {
+            const chestLinks = document.querySelectorAll(".list-pages-box p a");
+            let totalChests = 0;
+            let ownedChests = 0;
+
+            chestLinks.forEach(link => {
+                const chestName = getBaseName(link.textContent);
+                if (chestName) {
+                    totalChests++;
+                    if (inventoryNames.has(chestName)) ownedChests++;
+                }
+            });
+
+            if (totalChests > 0) {
+                const pct = Math.round((ownedChests / totalChests) * 100);
+                const barCls = pct === 100 ? "aqwt-progress-fill complete" : "aqwt-progress-fill";
+
+                // Remove existing progress div if any to avoid duplicates
+                const existingProgress = document.querySelector(".aqwt-chest-progress");
+                if (existingProgress) existingProgress.remove();
+
+                const statsDiv = document.createElement("div");
+                statsDiv.className = "aqwt-chest-progress";
+
+                const title = document.createElement("strong");
+                title.className = "aqwt-chest-title";
+                title.textContent = "Collection Chests Progress";
+                statsDiv.appendChild(title);
+
+                const counts = document.createElement("span");
+                counts.className = "aqwt-chest-counts";
+                counts.innerHTML = `<span class="aqwt-cell-have">${ownedChests}</span> / <span>${totalChests}</span> chests (${pct}%)`;
+                statsDiv.appendChild(counts);
+
+                const barWrap = document.createElement("div");
+                barWrap.className = "aqwt-progress-bar";
+                const barFill = document.createElement("div");
+                barFill.className = barCls;
+                barFill.style.width = pct + "%";
+                barFill.textContent = pct + "%";
+                barWrap.appendChild(barFill);
+                statsDiv.appendChild(barWrap);
+
+                const contentDiv = document.querySelector("#page-content");
+                if (contentDiv) contentDiv.insertBefore(statsDiv, contentDiv.firstChild);
+            }
+        }
+    });
+}
 
 // --- Server Boost Banner ---
 
@@ -1204,7 +1181,7 @@ async function initDropRates() {
         if (typeof entry === "object" && entry.tier) {
             lookup.set(name.toLowerCase(), entry);
             // Also store with getBaseName for fuzzy matching
-            const base = getBaseName(name).toLowerCase();
+            const base = getBaseName(name);
             if (base !== name.toLowerCase()) lookup.set(base, entry);
         }
     }
@@ -1228,7 +1205,7 @@ async function initDropRates() {
         if (link.querySelector(".aqwt-droprate-badge")) return;
 
         const text = link.textContent.trim();
-        const baseName = getBaseName(text).toLowerCase();
+        const baseName = getBaseName(text);
 
         const entry = lookup.get(baseName) || lookup.get(text.toLowerCase());
         if (entry) {
@@ -1251,7 +1228,7 @@ async function initDropRates() {
         if (!nameMatch) return;
 
         const rawName = nameMatch[1].replace(/"/g, "").trim();
-        const baseName = getBaseName(rawName).toLowerCase();
+        const baseName = getBaseName(rawName);
 
         const entry = lookup.get(baseName);
         if (entry) {
