@@ -18,12 +18,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/R41CY/AQWikiTools/archive/refs/heads/main.zip"><strong>Download ZIP (Chrome)</strong></a> · 
-  <a href="https://addons.mozilla.org/en-US/firefox/addon/aqwikitools/"><strong>Firefox Add-on</strong></a> · 
-  <a href="http://aqwwikitools.vercel.app"><strong>Website</strong></a> · 
+  <a href="https://github.com/darkero27/AQWikiTools/archive/refs/heads/main.zip"><strong>Download ZIP</strong></a> · 
   <a href="#installation"><strong>Install Guide</strong></a>
 </p>
 
+> **Note:** I only made fixes and improvements to the existing code, I am not the original creator. Original project by [R41CY](https://github.com/R41CY/AQWikiTools). All credit to the original creator for this amazing work!
 ---
 
 ## Overview
@@ -184,7 +183,7 @@ AQWikiTools/
 
 ### Chrome (Manual Install)
 
-1. **[Download the ZIP](https://github.com/R41CY/AQWikiTools/archive/refs/heads/main.zip)** from this repository.
+1. **[Download the ZIP](https://github.com/darkero27/AQWikiTools/archive/refs/heads/main.zip)** from this repository.
 2. **Extract** the ZIP to a folder on your computer.
 3. Open Chrome and go to `chrome://extensions`.
 4. **Enable Developer Mode** (toggle in top-right).
@@ -195,7 +194,7 @@ AQWikiTools/
 ### From Source
 
 ```bash
-git clone https://github.com/R41CY/AQWikiTools.git
+git clone https://github.com/darkero27/AQWikiTools.git
 ```
 
 Then follow the Chrome steps 3–7 above.
