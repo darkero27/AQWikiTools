@@ -9,15 +9,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/manifest-v3-blue?style=flat-square" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/version-3.0.0-red?style=flat-square" alt="Version 3.0.0">
-  <img src="https://img.shields.io/badge/platform-Chrome-yellow?style=flat-square&logo=googlechrome&logoColor=white" alt="Chrome">
-  <img src="https://img.shields.io/badge/platform-Firefox-ff7139?style=flat-square&logo=firefoxbrowser&logoColor=white" alt="Firefox">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/open_source-100%25-brightgreen?style=flat-square" alt="Open Source">
-</p>
-
-<p align="center">
   <a href="https://github.com/darkero27/AQWikiTools/archive/refs/heads/main.zip"><strong>Download ZIP</strong></a> · 
   <a href="#installation"><strong>Install Guide</strong></a>
 </p>
