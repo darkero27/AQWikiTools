@@ -83,12 +83,40 @@ document.addEventListener("mouseover", (e) => {
     let urlToSearch = null;
     const link = e.target.closest("a");
 
+    // Wiki page hover
     if (link && link.href.startsWith("http://aqwwiki.wikidot.com/") && !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
         urlToSearch = link.href;
-    } else if (IS_MANAGE_ACCOUNT && e.target.tagName === "TD") {
-        const td = e.target;
-        if (td.parentElement && td.parentElement.firstElementChild === td && td.textContent.trim() !== "") {
-            urlToSearch = generateWikiUrlFromText(td.textContent);
+    } 
+    // Account page hover - IMPROVED for all inventory pages
+    else if (IS_MANAGE_ACCOUNT) {
+        let itemName = null;
+        
+        // Case 1: Hover over a link (InventoryAwesomeUse, Inventory, etc)
+        if (link && link.textContent.trim()) {
+            itemName = link.textContent.trim();
+        }
+        // Case 2: Hover over a table cell (old Inventory page)
+        else if (e.target.tagName === "TD") {
+            const td = e.target;
+            if (td.parentElement && td.parentElement.firstElementChild === td) {
+                itemName = td.textContent.trim();
+            }
+        }
+        // Case 3: Hover over DevExtreme grid row (InventoryAwesomeUse)
+        else {
+            const row = e.target.closest(".dx-data-row");
+            if (row) {
+                const firstCell = row.querySelector("td:first-child a, td:first-child");
+                if (firstCell) {
+                    itemName = firstCell.textContent.trim();
+                }
+            }
+        }
+        
+        if (itemName && itemName !== "") {
+            // Remove quantity suffix like " x90"
+            itemName = itemName.replace(/\s+x[\d,]+$/i, "").trim();
+            urlToSearch = generateWikiUrlFromText(itemName);
         }
     }
 
