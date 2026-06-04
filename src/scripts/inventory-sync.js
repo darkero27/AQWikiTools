@@ -3,10 +3,11 @@
  * @description Fetches the player's full inventory from the AQW account API
  *   and persists it to chrome.storage.local.
  * 
- * @version 3.0.4 - Always syncs on load (no cache)
+ * @version 3.0.5 - Fixed page detection (exact match only)
  */
 
-if (window.location.href.includes("account.aq.com/AQW/Inventory")) {
+// PERBAIKAN: Hanya match exact path, bukan includes
+if (window.location.pathname === "/AQW/Inventory" || window.location.pathname === "/AQW/Inventory/") {
 
     // ============================================================
     // FETCH INVENTORY FROM WORKING API
