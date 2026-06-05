@@ -46,9 +46,26 @@ function getBaseName(itemName) {
     return cleaned;
 }
 
-const IS_MANAGE_ACCOUNT = window.location.href.includes("account.aq.com/AQW/Inventory");
-const IS_CHAR_PAGE = window.location.href.includes("account.aq.com/CharPage");
-const IS_WIKI_PAGE = window.location.href.includes("aqwwiki.wikidot.com");
+// --- Page Detection (Precise) ---
+const urlPath = window.location.pathname;
+const hostname = window.location.hostname;
+
+// Exact match untuk Inventory Management (hanya /AQW/Inventory saja)
+const IS_MANAGE_ACCOUNT = urlPath === "/AQW/Inventory" || urlPath === "/AQW/Inventory/";
+
+// CharPage detection (case insensitive)
+const IS_CHAR_PAGE = /\/CharPage/i.test(urlPath);
+
+// Wiki page detection
+const IS_WIKI_PAGE = hostname === "aqwwiki.wikidot.com";
+
+// Debug logging
+console.log("[AQW Tools] Page detection:", {
+    IS_MANAGE_ACCOUNT,
+    IS_CHAR_PAGE,
+    IS_WIKI_PAGE,
+    url: window.location.href
+});
 
 let AQWT_DROP_DATA_CACHE = null;
 
@@ -87,28 +104,34 @@ document.addEventListener("mouseover", (e) => {
     if (link && link.href.startsWith("http://aqwwiki.wikidot.com/") && !link.closest("sub") && !link.closest("#top-bar") && !link.closest("#side-bar") && !link.closest("#breadcrumbs")) {
         urlToSearch = link.href;
     } 
-    // Account page hover - IMPROVED for all inventory pages
-    else if (IS_MANAGE_ACCOUNT) {
+    // Account page hover - FIXED for InventoryAwesomeUse
+    else if (IS_MANAGE_ACCOUNT || window.location.href.includes("/AQW/InventoryAwesomeUse")) {
         let itemName = null;
         
-        // Case 1: Hover over a link (InventoryAwesomeUse, Inventory, etc)
-        if (link && link.textContent.trim()) {
+        // Case 1: Hover over a link that points to InventoryAwesomeConfirm (item link)
+        if (link && link.href && link.href.includes("InventoryAwesomeConfirm")) {
+            // Get item name from the link text
             itemName = link.textContent.trim();
         }
-        // Case 2: Hover over a table cell (old Inventory page)
+        // Case 2: Hover over any link with item name
+        else if (link && link.textContent && link.textContent.trim()) {
+            itemName = link.textContent.trim();
+        }
+        // Case 3: Hover over a table cell (old Inventory page)
         else if (e.target.tagName === "TD") {
             const td = e.target;
             if (td.parentElement && td.parentElement.firstElementChild === td) {
                 itemName = td.textContent.trim();
             }
         }
-        // Case 3: Hover over DevExtreme grid row (InventoryAwesomeUse)
+        // Case 4: Hover over DevExtreme grid row
         else {
             const row = e.target.closest(".dx-data-row");
             if (row) {
-                const firstCell = row.querySelector("td:first-child a, td:first-child");
-                if (firstCell) {
-                    itemName = firstCell.textContent.trim();
+                // Find the link inside the first cell
+                const itemLink = row.querySelector("td:first-child a");
+                if (itemLink) {
+                    itemName = itemLink.textContent.trim();
                 }
             }
         }
@@ -1276,6 +1299,270 @@ async function initDropRates() {
             }
         }
     });
+}
+
+// --- InventoryAwesomeUse Page: Mark Owned Items with Checkmark ---
+// --- InventoryAwesomeUse Page: Mark Owned Items with Checkmark ---
+const IS_INVENTORY_AWESOME_USE = window.location.href.includes("/AQW/InventoryAwesomeUse");
+
+if (IS_INVENTORY_AWESOME_USE) {
+    console.log("[AQW Tools] InventoryAwesomeUse page detected, adding ownership indicators...");
+    
+    let filterButtonsAdded = false;
+    let currentFilterMode = "all"; // all, showOwned, hideOwned
+    let gridRefreshObserver = null;
+    
+    function addOwnershipCheckmarks() {
+        chrome.storage.local.get(["savedInventory"], (result) => {
+            const inventory = result.savedInventory;
+            if (!inventory || inventory.length === 0) {
+                console.log("[AQW Tools] No inventory data available");
+                return;
+            }
+            
+            const ownedItems = new Set();
+            inventory.forEach(item => {
+                const cleanName = getBaseName(item.name);
+                ownedItems.add(cleanName);
+                const superClean = cleanName.replace(/\s*\([^)]*\)/g, "").trim();
+                if (superClean !== cleanName) {
+                    ownedItems.add(superClean);
+                }
+            });
+            
+            console.log(`[AQW Tools] Loaded ${ownedItems.size} unique owned items for matching`);
+            
+            const dataRows = document.querySelectorAll(".dx-data-row");
+            let matchedCount = 0;
+            
+            dataRows.forEach(row => {
+                if (row.querySelector(".aqwt-owned-checkmark")) return;
+                
+                const firstCell = row.querySelector("td:first-child");
+                if (!firstCell) return;
+                
+                const itemLink = firstCell.querySelector("a");
+                if (!itemLink) return;
+                
+                const itemName = itemLink.textContent.trim();
+                const cleanItemName = getBaseName(itemName);
+                
+                let isOwned = ownedItems.has(cleanItemName);
+                if (!isOwned) {
+                    const withoutParens = cleanItemName.replace(/\s*\([^)]*\)/g, "").trim();
+                    if (withoutParens && ownedItems.has(withoutParens)) {
+                        isOwned = true;
+                    }
+                }
+                
+                if (isOwned) {
+                    matchedCount++;
+                    
+                    const checkmark = document.createElement("span");
+                    checkmark.className = "aqwt-owned-checkmark";
+                    checkmark.innerHTML = "✓";
+                    checkmark.style.cssText = `
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        background: #4ade80;
+                        color: #000;
+                        font-size: 12px;
+                        font-weight: bold;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 50%;
+                        margin-left: 8px;
+                        cursor: help;
+                        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+                    `;
+                    checkmark.title = "You already own this item!";
+                    
+                    itemLink.style.display = "inline-flex";
+                    itemLink.style.alignItems = "center";
+                    itemLink.appendChild(checkmark);
+                    row.style.borderLeft = "3px solid #4ade80";
+                }
+            });
+            
+            if (matchedCount > 0) {
+                console.log(`[AQW Tools] ✓ Marked ${matchedCount} owned items with checkmarks`);
+                if (!filterButtonsAdded && document.querySelector(".dx-data-row")) {
+                    addOwnedFilterButton(matchedCount, dataRows.length);
+                    filterButtonsAdded = true;
+                    
+                    // Setup search input observer
+                    setTimeout(() => {
+                        const searchInput = document.querySelector(".dx-datagrid-search-panel input");
+                        if (searchInput && !searchInput.hasAttribute("data-aqwt-observed")) {
+                            searchInput.setAttribute("data-aqwt-observed", "true");
+                            searchInput.addEventListener("input", () => {
+                                setTimeout(() => {
+                                    if (currentFilterMode !== "all") {
+                                        const rows = document.querySelectorAll(".dx-data-row");
+                                        rows.forEach(row => {
+                                            const hasCheckmark = row.querySelector(".aqwt-owned-checkmark");
+                                            if (currentFilterMode === "showOwned") {
+                                                row.style.display = hasCheckmark ? "" : "none";
+                                            } else if (currentFilterMode === "hideOwned") {
+                                                row.style.display = hasCheckmark ? "none" : "";
+                                            }
+                                        });
+                                    }
+                                }, 200);
+                            });
+                        }
+                    }, 500);
+                }
+            }
+        });
+    }
+    
+    function addOwnedFilterButton(ownedCount, totalCount) {
+        if (document.getElementById("aqwt-owned-filter-btn")) return;
+        
+        const toolbarBefore = document.querySelector(".dx-toolbar-before");
+        if (!toolbarBefore) return;
+        
+        const filterContainer = document.createElement("div");
+        filterContainer.id = "aqwt-owned-filter-btn";
+        filterContainer.style.display = "flex";
+        filterContainer.style.gap = "8px";
+        filterContainer.style.marginLeft = "8px";
+        
+        const showOwnedBtn = document.createElement("div");
+        showOwnedBtn.className = "dx-item dx-toolbar-item dx-toolbar-button";
+        showOwnedBtn.innerHTML = `<div role="button" class="dx-widget dx-button dx-button-mode-contained dx-button-normal dx-button-has-text" tabindex="0"><div class="dx-button-content"><span class="dx-button-text">✅ Show Owned </span></div></div>`;
+        const hideOwnedBtn = document.createElement("div");
+        hideOwnedBtn.className = "dx-item dx-toolbar-item dx-toolbar-button";
+        hideOwnedBtn.innerHTML = `<div role="button" class="dx-widget dx-button dx-button-mode-contained dx-button-normal dx-button-has-text" tabindex="0"><div class="dx-button-content"><span class="dx-button-text">👁️ Hide Owned </span></div></div>`;
+        
+        const resetBtn = document.createElement("div");
+        resetBtn.className = "dx-item dx-toolbar-item dx-toolbar-button";
+        resetBtn.innerHTML = `<div role="button" class="dx-widget dx-button dx-button-mode-contained dx-button-normal dx-button-has-text" tabindex="0"><div class="dx-button-content"><span class="dx-button-text">🔄 Reset</span></div></div>`;
+        
+        const showBtnElement = showOwnedBtn.querySelector(".dx-button");
+        const hideBtnElement = hideOwnedBtn.querySelector(".dx-button");
+        const resetBtnElement = resetBtn.querySelector(".dx-button");
+        
+        [showBtnElement, hideBtnElement, resetBtnElement].forEach(btn => {
+            btn.style.backgroundColor = "#2d2d2d";
+            btn.style.color = "#fff";
+            btn.style.border = "none";
+            btn.style.borderRadius = "4px";
+            btn.style.cursor = "pointer";
+        });
+        
+        function applyFilter() {
+            const rows = document.querySelectorAll(".dx-data-row");
+            rows.forEach(row => {
+                const hasCheckmark = row.querySelector(".aqwt-owned-checkmark");
+                switch (currentFilterMode) {
+                    case "showOwned":
+                        row.style.display = hasCheckmark ? "" : "none";
+                        break;
+                    case "hideOwned":
+                        row.style.display = hasCheckmark ? "none" : "";
+                        break;
+                    default:
+                        row.style.display = "";
+                        break;
+                }
+            });
+        }
+        
+        function setupGridObserver() {
+            if (gridRefreshObserver) gridRefreshObserver.disconnect();
+            
+            const gridContainer = document.querySelector("#dataGridContainer");
+            if (!gridContainer) return;
+            
+            gridRefreshObserver = new MutationObserver(() => {
+                setTimeout(applyFilter, 100);
+            });
+            
+            gridRefreshObserver.observe(gridContainer, { 
+                childList: true, 
+                subtree: true,
+                attributes: true,
+                attributeFilter: ["style", "class"]
+            });
+            
+            const searchInput = document.querySelector(".dx-datagrid-search-panel input");
+            if (searchInput && !searchInput.hasAttribute("data-aqwt-filter-observed")) {
+                searchInput.setAttribute("data-aqwt-filter-observed", "true");
+                searchInput.addEventListener("input", () => {
+                    setTimeout(applyFilter, 150);
+                });
+            }
+            
+            const pager = document.querySelector(".dx-pager");
+            if (pager) {
+                const pagerObserver = new MutationObserver(() => setTimeout(applyFilter, 150));
+                pagerObserver.observe(pager, { childList: true, subtree: true, attributes: true });
+            }
+        }
+        
+        showBtnElement.addEventListener("click", () => {
+            currentFilterMode = "showOwned";
+            applyFilter();
+            showBtnElement.style.backgroundColor = "#4ade80";
+            showBtnElement.style.color = "#000";
+            hideBtnElement.style.backgroundColor = "#2d2d2d";
+            hideBtnElement.style.color = "#fff";
+            resetBtnElement.style.backgroundColor = "#2d2d2d";
+            resetBtnElement.style.color = "#fff";
+            setupGridObserver();
+            console.log("[AQW Tools] Show Owned mode active");
+        });
+        
+        hideBtnElement.addEventListener("click", () => {
+            currentFilterMode = "hideOwned";
+            applyFilter();
+            hideBtnElement.style.backgroundColor = "#f87171";
+            hideBtnElement.style.color = "#000";
+            showBtnElement.style.backgroundColor = "#2d2d2d";
+            showBtnElement.style.color = "#fff";
+            resetBtnElement.style.backgroundColor = "#2d2d2d";
+            resetBtnElement.style.color = "#fff";
+            setupGridObserver();
+            console.log("[AQW Tools] Hide Owned mode active");
+        });
+        
+        resetBtnElement.addEventListener("click", () => {
+            currentFilterMode = "all";
+            applyFilter();
+            [showBtnElement, hideBtnElement, resetBtnElement].forEach(btn => {
+                btn.style.backgroundColor = "#2d2d2d";
+                btn.style.color = "#fff";
+            });
+            if (gridRefreshObserver) {
+                gridRefreshObserver.disconnect();
+                gridRefreshObserver = null;
+            }
+            console.log("[AQW Tools] Filter reset");
+        });
+        
+        filterContainer.appendChild(showOwnedBtn);
+        filterContainer.appendChild(hideOwnedBtn);
+        filterContainer.appendChild(resetBtn);
+        toolbarBefore.appendChild(filterContainer);
+        
+        setupGridObserver();
+    }
+    
+    let checkmarkTimeout;
+    const gridObserver = new MutationObserver(() => {
+        clearTimeout(checkmarkTimeout);
+        checkmarkTimeout = setTimeout(() => {
+            if (document.querySelector(".dx-data-row")) {
+                addOwnershipCheckmarks();
+            }
+        }, 500);
+    });
+    
+    gridObserver.observe(document.body, { childList: true, subtree: true });
+    setTimeout(addOwnershipCheckmarks, 2000);
 }
 
 // Run after a short delay to let other content scripts finish
