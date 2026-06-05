@@ -3,10 +3,10 @@
  * @description Fetches the player's full inventory from the AQW account API
  *   and persists it to chrome.storage.local.
  * 
- * @version 3.0.5 - Fixed page detection (exact match only)
+ * @version 3.0.7 - Sync button in grid toolbar (blue color, next to Refresh)
  */
 
-// PERBAIKAN: Hanya match exact path, bukan includes
+// Hanya jalan di halaman Inventory Management yang tepat
 if (window.location.pathname === "/AQW/Inventory" || window.location.pathname === "/AQW/Inventory/") {
 
     // ============================================================
@@ -20,11 +20,10 @@ if (window.location.pathname === "/AQW/Inventory" || window.location.pathname ==
         let skip = 0;
         const take = 300;
         let page = 1;
-        let hasMore = true;
         let consecutiveErrors = 0;
         
         try {
-            while (hasMore && consecutiveErrors < 3) {
+            while (consecutiveErrors < 3) {
                 console.log(`[AQWikiTools] Fetching skip=${skip}, take=${take} (page ${page})...`);
                 
                 try {
@@ -185,44 +184,156 @@ if (window.location.pathname === "/AQW/Inventory" || window.location.pathname ==
         }, 4000);
     }
     
-    function addSyncButton() {
-        const header = document.querySelector(".tblHeader") || document.querySelector("h4");
-        if (!header) return;
-        
-        let syncButton = document.getElementById("aqw-manual-sync-btn");
-        if (syncButton) return;
-        
-        syncButton = document.createElement("button");
-        syncButton.id = "aqw-manual-sync-btn";
-        syncButton.textContent = "⟳ Sync Inventory";
-        syncButton.style.cssText = `
-            margin-left: 15px;
-            padding: 4px 12px;
-            background: #4caf50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: bold;
-        `;
-        syncButton.onclick = async () => {
-            syncButton.disabled = true;
-            syncButton.textContent = "⟳ Syncing...";
-            await synchronizeInventory(true);
-            syncButton.disabled = false;
-            syncButton.textContent = "⟳ Sync Inventory";
-        };
-        
-        header.appendChild(syncButton);
+    // ============================================================
+    // ADD ANIMATION CSS
+    // ============================================================
+    
+    function addAnimationCSS() {
+        if (!document.getElementById("aqw-animation-style")) {
+            const style = document.createElement("style");
+            style.id = "aqw-animation-style";
+            style.textContent = `
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                .aqw-spinning {
+                    animation: spin 0.5s linear !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
     }
     
     // ============================================================
-    // MAIN SYNC - ALWAYS SYNC (NO CACHE)
+    // ADD SYNC BUTTON TO GRID TOOLBAR (blue color, next to Refresh)
     // ============================================================
     
-    async function synchronizeInventory(force = false) {
-        console.log("[AQWikiTools] 🔄 Starting inventory synchronization (forced refresh)...");
+    function addSyncButtonToGridToolbar() {
+        console.log("[AQWikiTools] Looking to add sync button to grid toolbar...");
+        
+        // Cek apakah tombol sudah ada
+        let syncButton = document.getElementById("aqw-manual-sync-btn");
+        if (syncButton) {
+            console.log("[AQWikiTools] Sync button already exists");
+            return;
+        }
+        
+        // Tunggu DataGrid toolbar tersedia
+        const findToolbar = setInterval(() => {
+            const toolbarBefore = document.querySelector(".dx-toolbar-items-container .dx-toolbar-before");
+            if (toolbarBefore && !document.getElementById("aqw-manual-sync-btn")) {
+                clearInterval(findToolbar);
+                
+                // Cari tombol Refresh yang sudah ada
+                const existingRefreshBtn = Array.from(document.querySelectorAll(".dx-button")).find(
+                    btn => btn.getAttribute("aria-label") === "Refresh" || 
+                           (btn.textContent && btn.textContent.includes("Refresh"))
+                );
+                
+                // Buat tombol sync dengan warna biru (primary)
+                const syncBtnContainer = document.createElement("div");
+                syncBtnContainer.id = "aqw-manual-sync-btn";
+                syncBtnContainer.className = "dx-item dx-toolbar-item dx-toolbar-button";
+                syncBtnContainer.style.marginLeft = "5px";
+                syncBtnContainer.innerHTML = `
+                    <div class="dx-item-content dx-toolbar-item-content">
+                        <div role="button" aria-label="Sync Inventory" class="dx-widget dx-button dx-button-mode-contained dx-button-normal dx-button-has-text dx-button-has-icon dx-button-success" tabindex="0" title="Sync inventory to local storage" id="aqw-sync-grid-btn" style="background-color: #007bff; border-color: #007bff;">
+                            <div class="dx-button-content">
+                                <i class="dx-icon dx-icon-download"></i>
+                                <span class="dx-button-text">Sync Inventory</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Sisipkan setelah tombol Refresh jika ada
+                if (existingRefreshBtn) {
+                    const refreshContainer = existingRefreshBtn.closest(".dx-toolbar-item");
+                    if (refreshContainer && refreshContainer.nextSibling) {
+                        toolbarBefore.insertBefore(syncBtnContainer, refreshContainer.nextSibling);
+                    } else if (refreshContainer) {
+                        toolbarBefore.appendChild(syncBtnContainer);
+                    } else {
+                        toolbarBefore.appendChild(syncBtnContainer);
+                    }
+                } else {
+                    toolbarBefore.appendChild(syncBtnContainer);
+                }
+                
+                // Event listener untuk sync
+                const syncGridBtn = document.getElementById("aqw-sync-grid-btn");
+                if (syncGridBtn) {
+                    // Tambahkan efek hover
+                    syncGridBtn.addEventListener("mouseenter", () => {
+                        syncGridBtn.style.backgroundColor = "#0056b3";
+                        syncGridBtn.style.borderColor = "#0056b3";
+                    });
+                    syncGridBtn.addEventListener("mouseleave", () => {
+                        syncGridBtn.style.backgroundColor = "#007bff";
+                        syncGridBtn.style.borderColor = "#007bff";
+                    });
+                    
+                    syncGridBtn.addEventListener("click", async () => {
+                        const icon = syncGridBtn.querySelector(".dx-icon");
+                        if (icon) {
+                            icon.classList.add("aqw-spinning");
+                            setTimeout(() => icon.classList.remove("aqw-spinning"), 500);
+                        }
+                        
+                        const originalText = syncGridBtn.querySelector(".dx-button-text").textContent;
+                        syncGridBtn.querySelector(".dx-button-text").textContent = "Syncing...";
+                        syncGridBtn.style.pointerEvents = "none";
+                        syncGridBtn.style.opacity = "0.7";
+                        
+                        await synchronizeInventory();
+                        
+                        syncGridBtn.querySelector(".dx-button-text").textContent = originalText;
+                        syncGridBtn.style.pointerEvents = "";
+                        syncGridBtn.style.opacity = "";
+                    });
+                }
+                
+                console.log("[AQWikiTools] ✅ Blue sync button added to grid toolbar!");
+                
+                // Tampilkan info last sync
+                addLastSyncInfo();
+            }
+        }, 500);
+    }
+    
+    // ============================================================
+    // ADD LAST SYNC INFO TO TOOLBAR
+    // ============================================================
+    
+    function addLastSyncInfo() {
+        chrome.storage.local.get(["savedInventoryCount", "savedInventoryLastSync"], (result) => {
+            if (result.savedInventoryCount) {
+                const toolbarAfter = document.querySelector(".dx-toolbar-items-container .dx-toolbar-after");
+                if (toolbarAfter && !document.getElementById("aqw-sync-info")) {
+                    const infoContainer = document.createElement("div");
+                    infoContainer.id = "aqw-sync-info";
+                    infoContainer.className = "dx-item dx-toolbar-item";
+                    infoContainer.style.cssText = "margin-left: 10px; font-size: 11px; color: #666;";
+                    
+                    const lastSync = result.savedInventoryLastSync ? new Date(result.savedInventoryLastSync).toLocaleString() : "never";
+                    infoContainer.innerHTML = `
+                        <div class="dx-item-content dx-toolbar-item-content">
+                            <span>📦 ${result.savedInventoryCount} items cached | Last sync: ${lastSync}</span>
+                        </div>
+                    `;
+                    toolbarAfter.appendChild(infoContainer);
+                }
+            }
+        });
+    }
+    
+    // ============================================================
+    // MAIN SYNC - MANUAL ONLY (NO AUTO SYNC)
+    // ============================================================
+    
+    async function synchronizeInventory() {
+        console.log("[AQWikiTools] 🔄 Starting manual inventory synchronization...");
         
         showStatusMessage("Syncing inventory...", "info");
         
@@ -231,6 +342,12 @@ if (window.location.pathname === "/AQW/Inventory" || window.location.pathname ==
             await saveInventoryToStorage(inventory);
             showStatusMessage(`✅ Synced ${inventory.length} items successfully!`, "success");
             console.log(`[AQWikiTools] ✅ Sync completed: ${inventory.length} items`);
+            
+            // Update info last sync
+            const existingInfo = document.getElementById("aqw-sync-info");
+            if (existingInfo) existingInfo.remove();
+            addLastSyncInfo();
+            
             return inventory;
         } catch (error) {
             console.error("[AQWikiTools] ❌ Sync failed:", error);
@@ -251,22 +368,21 @@ if (window.location.pathname === "/AQW/Inventory" || window.location.pathname ==
     }
     
     // ============================================================
-    // INITIALIZE - ALWAYS SYNC ON PAGE LOAD
+    // INITIALIZE
     // ============================================================
     
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", async () => {
-            setTimeout(async () => {
-                addSyncButton();
-                await synchronizeInventory(true); // ALWAYS SYNC
-            }, 2000);
-        });
-    } else {
-        setTimeout(async () => {
-            addSyncButton();
-            await synchronizeInventory(true); // ALWAYS SYNC
-        }, 2000);
+    function waitForPageReady() {
+        if (document.body && document.querySelector("#dataGridContainer")) {
+            console.log("[AQWikiTools] Page ready, adding buttons...");
+            addAnimationCSS();
+            setTimeout(addSyncButtonToGridToolbar, 1500);
+        } else {
+            console.log("[AQWikiTools] Waiting for page to load...");
+            setTimeout(waitForPageReady, 500);
+        }
     }
+    
+    waitForPageReady();
     
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = { 
@@ -276,5 +392,5 @@ if (window.location.pathname === "/AQW/Inventory" || window.location.pathname ==
         };
     }
     
-    console.log("[AQWikiTools] Inventory sync module loaded (always-sync mode)");
+    console.log("[AQWikiTools] Inventory sync module loaded (v3.0.7 - Blue sync button in grid toolbar)");
 }
