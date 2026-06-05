@@ -2,7 +2,7 @@
   <img src="website/assets/logo.png" alt="AQWikiTools Logo" width="100">
 </p>
 
-<h1 align="center">AQWikiTools</h1>
+<h1 align="center">AQWikiTools</h1>A
 
 <p align="center">
   <strong>A browser extension for Chrome & Firefox that supercharges the AQW Wiki with item previews, calculators, inventory tracking, dark mode, and more.</strong>
@@ -23,7 +23,17 @@
 The extension syncs your in-game inventory from [account.aq.com](https://account.aq.com) and uses it across every feature: highlighting items you own, calculating what you still need, and tracking your overall collection progress.
 
 ---
+## Changelog
 
+| No | Change | Screenshot |
+|----|--------|------------|
+| 1 | **Added manual Sync Button on Inventory Account** to avoid "Too Many Request" error. Button placed in grid toolbar (next to Refresh), styled in blue with hover effect. | `/img/ss1.png` |
+| 2 | **Added hover view item on IoDA webpage** to preview items before claiming. | `/img/ss2.png` |
+| 3 | **Fixed Sync Inventory on old AQW Inventory** — now works correctly on legacy inventory pages. | `/img/ss3.png` |
+| 4 | **Added Mark Item have on IoDA Webpage** — items you own are visually marked. | `/img/ss4.png` |
+| 5 | **Added Filter have Item on IoDA Webpage** — filter to show only owned/unowned items. | `/img/ss5.png` |
+
+---
 ## Is It Safe?
 
 **Yes.** AQWikiTools is 100% open source — every line of code is right here for you to inspect. Here's what you should know:
