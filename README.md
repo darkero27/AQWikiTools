@@ -2,7 +2,7 @@
   <img src="website/assets/logo.png" alt="AQWikiTools Logo" width="100">
 </p>
 
-<h1 align="center">AQWikiTools</h1>A
+<h1 align="center">AQWikiTools</h1>
 
 <p align="center">
   <strong>A browser extension for Chrome & Firefox that supercharges the AQW Wiki with item previews, calculators, inventory tracking, dark mode, and more.</strong>
@@ -24,14 +24,39 @@ The extension syncs your in-game inventory from [account.aq.com](https://account
 
 ---
 ## Changelog
+### 1. Added manual Sync Button on Inventory Account
+> To avoid "Too Many Request" error. Button placed in grid toolbar (next to Refresh), styled in blue with hover effect.
 
-| No | Change | Screenshot |
-|----|--------|------------|
-| 1 | **Added manual Sync Button on Inventory Account** to avoid "Too Many Request" error. Button placed in grid toolbar (next to Refresh), styled in blue with hover effect. | `/img/ss1.png` |
-| 2 | **Added hover view item on IoDA webpage** to preview items before claiming. | `/img/ss2.png` |
-| 3 | **Fixed Sync Inventory on old AQW Inventory** — now works correctly on legacy inventory pages. | `/img/ss3.png` |
-| 4 | **Added Mark Item have on IoDA Webpage** — items you own are visually marked. | `/img/ss4.png` |
-| 5 | **Added Filter have Item on IoDA Webpage** — filter to show only owned/unowned items. | `/img/ss5.png` |
+<img src="img/ss1.png" alt="Sync Button" width="600">
+
+---
+
+#### 2. Added hover view item on IoDA webpage
+> Preview items before claiming on IoDA webpage.
+
+<img src="img/ss2.png" alt="Hover View on IoDA" width="600">
+
+---
+
+#### 3. Fixed Sync Inventory on old AQW Inventory
+> Now works correctly on legacy inventory pages.
+
+<img src="img/ss3.png" alt="Fix Sync Old Inventory" width="600">
+
+---
+
+#### 4. Added Mark Item have on IoDA Webpage
+> Items you own are visually marked on IoDA webpage.
+
+<img src="img/ss4.png" alt="Mark Owned Items on IoDA" width="600">
+
+---
+
+#### 5. Added Filter have Item on IoDA Webpage
+> Filter to show only owned/unowned items on IoDA webpage.
+
+<img src="img/ss5.png" alt="Filter Items on IoDA" width="600">
+
 
 ---
 ## Is It Safe?
